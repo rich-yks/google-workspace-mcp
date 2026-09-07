@@ -41,9 +41,9 @@ message/file bodies by default.
 ### Gmail (12)
 - `gmail_search` — search with Gmail operators. Compact response.
 - `gmail_read` — read one message or full thread. Bodies opt-in.
-- `gmail_send` — send mail, optional `from_alias` for Send-As identities
-- `gmail_draft` — create a draft
-- `gmail_reply` — reply (preserves thread + headers), optional reply_all
+- `gmail_send` — send mail, optional `from_alias` for Send-As identities, optional `attachments` (local file paths)
+- `gmail_draft` — create a draft, optional `attachments`
+- `gmail_reply` — reply (preserves thread + headers), optional reply_all and `attachments`
 - `gmail_labels_list` — list all labels
 - `gmail_label_apply` — batch add/remove labels
 - `gmail_archive` — batch archive (remove INBOX)

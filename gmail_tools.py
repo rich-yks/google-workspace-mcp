@@ -13,6 +13,7 @@ Design rules:
 from __future__ import annotations
 
 import base64
+import mimetypes
 import pathlib
 import re
 from email.message import EmailMessage
@@ -28,6 +29,31 @@ from accounts import service
 # the modules' own tests keep working unchanged.
 _AUDIT_LOG = audit.LOG_PATH
 _audit = audit.record
+
+
+# ---------------------------------------------------------------------------
+# Outgoing attachments
+# ---------------------------------------------------------------------------
+
+
+def _attach_files(msg: EmailMessage, attachments: list[str] | None) -> list[dict]:
+    """Attach local files to an outgoing message. Returns [{filename, size}].
+
+    Paths are expanded (~) and must exist: a missing file raises before any
+    API call, so a typo never produces a mail that silently lacks its
+    attachment. MIME type is guessed from the extension, octet-stream otherwise.
+    """
+    added: list[dict] = []
+    for raw_path in attachments or []:
+        path = pathlib.Path(raw_path).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Attachment not found: {raw_path}")
+        mime, _ = mimetypes.guess_type(path.name)
+        maintype, subtype = (mime or "application/octet-stream").split("/", 1)
+        data = path.read_bytes()
+        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=path.name)
+        added.append({"filename": path.name, "size": len(data)})
+    return added
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +268,7 @@ def _build_raw(
     in_reply_to: str | None = None,
     references: str | None = None,
     thread_message_id: str | None = None,
+    attachments: list[str] | None = None,
 ) -> tuple[str, str | None]:
     msg = EmailMessage()
     if from_alias:
@@ -259,6 +286,7 @@ def _build_raw(
     if references:
         msg["References"] = references
     msg.set_content(body)
+    _attach_files(msg, attachments)
 
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     return raw, thread_message_id
@@ -295,13 +323,20 @@ def send(
     bcc: list[str] | None = None,
     reply_to: str | None = None,
     dry_run: bool = False,
+    attachments: list[str] | None = None,
 ) -> dict:
     """Send mail. DESTRUCTIVE — irreversible once sent.
 
     `from_alias` lets you send as a configured Send-As identity.
-    If dry_run=True, returns what WOULD be sent without calling the API.
+    `attachments` is a list of local file paths; a missing file raises before
+    anything is sent. If dry_run=True, returns what WOULD be sent without
+    calling the API.
     """
-    raw, _ = _build_raw(to, subject, body, from_alias=from_alias, cc=cc, bcc=bcc, reply_to=reply_to)
+    raw, _ = _build_raw(
+        to, subject, body, from_alias=from_alias, cc=cc, bcc=bcc, reply_to=reply_to,
+        attachments=attachments,
+    )
+    attached = _attach_files(EmailMessage(), attachments)
     if dry_run:
         return {
             "dry_run": True,
@@ -310,12 +345,20 @@ def send(
             "from_alias": from_alias,
             "cc": cc,
             "body_preview": body[:500],
+            "attachments": attached,
             "status": "NOT SENT — dry_run=True",
         }
     svc = service("gmail", "v1", account=account)
     sent = svc.users().messages().send(userId="me", body={"raw": raw}).execute()
-    _audit("gmail_send", f"account={account or 'default'} to={to} subject={subject!r}")
-    return {"id": sent["id"], "thread_id": sent.get("threadId"), "status": "sent"}
+    _audit(
+        "gmail_send",
+        f"account={account or 'default'} to={to} subject={subject!r} "
+        f"attachments={[a['filename'] for a in attached]}",
+    )
+    return {
+        "id": sent["id"], "thread_id": sent.get("threadId"), "status": "sent",
+        "attachments": attached,
+    }
 
 
 def draft(
@@ -326,9 +369,12 @@ def draft(
     from_alias: str | None = None,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    attachments: list[str] | None = None,
 ) -> dict:
     svc = service("gmail", "v1", account=account)
-    raw, _ = _build_raw(to, subject, body, from_alias=from_alias, cc=cc, bcc=bcc)
+    raw, _ = _build_raw(
+        to, subject, body, from_alias=from_alias, cc=cc, bcc=bcc, attachments=attachments,
+    )
     created = (
         svc.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
     )
@@ -341,10 +387,12 @@ def reply(
     account: str | None = None,
     reply_all: bool = False,
     dry_run: bool = False,
+    attachments: list[str] | None = None,
 ) -> dict:
     """Reply to a message. DESTRUCTIVE — sends immediately, same blast radius as gmail_send.
 
-    If dry_run=True, shows what WOULD be sent without sending.
+    `attachments` is a list of local file paths. If dry_run=True, shows what
+    WOULD be sent without sending.
     """
     svc = service("gmail", "v1", account=account)
     original = svc.users().messages().get(userId="me", id=message_id, format="metadata").execute()
@@ -381,6 +429,7 @@ def reply(
         cc=cc_list,
         in_reply_to=in_reply_to,
         references=references,
+        attachments=attachments,
     )
     sent = (
         svc.users()

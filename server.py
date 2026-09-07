@@ -129,6 +129,7 @@ def gmail_send(
     bcc: list[str] | None = None,
     reply_to: str | None = None,
     dry_run: bool = False,
+    attachments: list[str] | None = None,
 ) -> dict:
     """Send an email. DESTRUCTIVE — irreversible once sent.
 
@@ -138,11 +139,14 @@ def gmail_send(
             Use gmail_sendas_list to see available aliases.
         dry_run: If True, return what WOULD be sent without calling the API.
             Use this to verify recipient, subject, and body before committing.
+        attachments: Local file paths to attach (any size Gmail accepts, 25 MB
+            total). Files are read from disk, never passed inline. A missing
+            file raises before anything is sent.
     """
     return gmail_tools.send(
         to=to, subject=subject, body=body, account=account,
         from_alias=from_alias, cc=cc, bcc=bcc, reply_to=reply_to,
-        dry_run=dry_run,
+        dry_run=dry_run, attachments=attachments,
     )
 
 
@@ -155,11 +159,16 @@ def gmail_draft(
     from_alias: str | None = None,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    attachments: list[str] | None = None,
 ) -> dict:
-    """Create a draft. Does not send."""
+    """Create a draft. Does not send.
+
+    Args:
+        attachments: Local file paths to attach, read from disk.
+    """
     return gmail_tools.draft(
         to=to, subject=subject, body=body, account=account,
-        from_alias=from_alias, cc=cc, bcc=bcc,
+        from_alias=from_alias, cc=cc, bcc=bcc, attachments=attachments,
     )
 
 
@@ -170,16 +179,18 @@ def gmail_reply(
     account: str | None = None,
     reply_all: bool = False,
     dry_run: bool = False,
+    attachments: list[str] | None = None,
 ) -> dict:
     """Reply to a message. DESTRUCTIVE — sends immediately, same blast radius as gmail_send.
     Preserves thread + headers.
 
     Args:
         dry_run: If True, show what WOULD be sent without sending.
+        attachments: Local file paths to attach, read from disk.
     """
     return gmail_tools.reply(
         message_id=message_id, body=body, account=account, reply_all=reply_all,
-        dry_run=dry_run,
+        dry_run=dry_run, attachments=attachments,
     )
 
 
