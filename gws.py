@@ -9,6 +9,8 @@ le trousseau : rien à configurer de plus.
     .venv/bin/python gws.py gmail-draft --to a@b.c --subject "..." --body "..." [--attach f.pdf ...]
     .venv/bin/python gws.py gmail-reply --message-id <id> --body "..." [--attach f.pdf ...]
     .venv/bin/python gws.py drive-download --file-id <id> --dest <fichier ou dossier>
+    .venv/bin/python gws.py drive-upload   --file <chemin> --parent-id <id> [--name <nom>]
+    .venv/bin/python gws.py drive-mkdir    --name <nom> [--parent-id <id>]
 
 `--body-file chemin` remplace `--body` pour un texte long. `--dry-run` montre ce
 qui partirait sans rien envoyer. La sortie est toujours du JSON, sur stdout.
@@ -70,7 +72,28 @@ def main(argv: list[str] | None = None) -> int:
     p_dl.add_argument("--export-mime", help="pour un Doc/Sheet natif, défaut application/pdf")
     p_dl.add_argument("--account")
 
+    p_up = sub.add_parser("drive-upload", help="téléverse un fichier local dans un dossier Drive")
+    p_up.add_argument("--file", required=True)
+    p_up.add_argument("--parent-id")
+    p_up.add_argument("--name")
+    p_up.add_argument("--account")
+
+    p_mk = sub.add_parser("drive-mkdir", help="crée un dossier Drive, retourne son id")
+    p_mk.add_argument("--name", required=True)
+    p_mk.add_argument("--parent-id")
+    p_mk.add_argument("--account")
+
     args = parser.parse_args(argv)
+
+    if args.cmd == "drive-upload":
+        out = drive_tools.upload(local_path=args.file, name=args.name,
+                                 parent_id=args.parent_id, account=args.account)
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "drive-mkdir":
+        out = drive_tools.create_folder(name=args.name, parent_id=args.parent_id, account=args.account)
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0
 
     if args.cmd == "drive-download":
         out = drive_tools.download(
