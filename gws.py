@@ -8,6 +8,7 @@ le trousseau : rien à configurer de plus.
     .venv/bin/python gws.py gmail-send  --to a@b.c --subject "..." --body "..." [--attach f.pdf ...]
     .venv/bin/python gws.py gmail-draft --to a@b.c --subject "..." --body "..." [--attach f.pdf ...]
     .venv/bin/python gws.py gmail-reply --message-id <id> --body "..." [--attach f.pdf ...]
+    .venv/bin/python gws.py drive-download --file-id <id> --dest <fichier ou dossier>
 
 `--body-file chemin` remplace `--body` pour un texte long. `--dry-run` montre ce
 qui partirait sans rien envoyer. La sortie est toujours du JSON, sur stdout.
@@ -22,6 +23,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import drive_tools  # noqa: E402
 import gmail_tools  # noqa: E402
 
 
@@ -62,7 +64,22 @@ def main(argv: list[str] | None = None) -> int:
     p_reply.add_argument("--dry-run", action="store_true")
     common(p_reply, needs_to=False)
 
+    p_dl = sub.add_parser("drive-download", help="télécharge un fichier Drive sur le disque")
+    p_dl.add_argument("--file-id", required=True)
+    p_dl.add_argument("--dest", required=True, help="fichier, ou dossier (garde le nom Drive)")
+    p_dl.add_argument("--export-mime", help="pour un Doc/Sheet natif, défaut application/pdf")
+    p_dl.add_argument("--account")
+
     args = parser.parse_args(argv)
+
+    if args.cmd == "drive-download":
+        out = drive_tools.download(
+            file_id=args.file_id, dest=args.dest, account=args.account,
+            export_mime=args.export_mime,
+        )
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0
+
     body = _body(args)
 
     if args.cmd == "gmail-send":

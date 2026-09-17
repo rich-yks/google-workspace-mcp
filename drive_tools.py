@@ -153,6 +153,43 @@ def read_file(
     return {**_summary(meta), "content": text, "truncated": truncated, "bytes": len(raw)}
 
 
+def download(
+    file_id: str,
+    dest: str,
+    account: str | None = None,
+    export_mime: str | None = None,
+) -> dict:
+    """Download a Drive file to a local path, as bytes, without passing the
+    content through the model. `dest` is a file path, or a directory (the Drive
+    name is then used). Google-native files are exported (PDF by default).
+    """
+    import pathlib
+
+    svc = service("drive", "v3", account=account)
+    meta = (
+        svc.files()
+        .get(fileId=file_id, fields=_BASE_FIELDS, supportsAllDrives=True)
+        .execute()
+    )
+    mime = meta.get("mimeType", "")
+    if mime.startswith("application/vnd.google-apps"):
+        target = export_mime or "application/pdf"
+        request = svc.files().export_media(fileId=file_id, mimeType=target)
+    else:
+        request = svc.files().get_media(fileId=file_id, supportsAllDrives=True)
+
+    out = pathlib.Path(dest).expanduser()
+    if out.is_dir():
+        out = out / meta["name"]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("wb") as fh:
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+    return {**_summary(meta), "saved_to": str(out), "bytes": out.stat().st_size}
+
+
 def list_folder(
     folder_id: str = "root",
     account: str | None = None,
