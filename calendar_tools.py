@@ -104,15 +104,27 @@ DEFAULT_TZ = _local_tz_name()
 # Colors
 # ---------------------------------------------------------------------------
 
-# Google's eleven event colors, by colorId. The first name is the one read back;
-# the others are accepted on the way in (Google's own French labels, and the
-# names Richard uses). "vert" is 10: read on 28 Sept 2026 from his 26 Oct physio
-# block, which he had colored by hand. Workouts are 3.
+# Richard's own labels, set in Google Calendar on 28 Sept 2026 and matched
+# against the colors already on his events (Gro and MonarK sat in 9, workouts in
+# 3). In PRIORITY order: the first that fits an event wins, see create_event.
+# A label is what color_name reads back.
+_ETIQUETTES: dict[str, str] = {
+    "11": "urgent",
+    "10": "road",
+    "4": "girls",
+    "3": "workout",
+    "9": "work facturable",
+    "8": "work",
+    "6": "maison",
+}
+
+# Google's eleven event colors, by colorId: the plain color first, then Google's
+# own French label. Both are accepted on the way in.
 # Same contract as x.api (connecteurs/google/outils/agenda.py): keep them twins.
 _COULEURS: dict[str, tuple[str, ...]] = {
     "1": ("lavande",),
     "2": ("sauge", "vert pale"),
-    "3": ("mauve", "raisin", "workout"),
+    "3": ("mauve", "raisin"),
     "4": ("rose", "flamant"),
     "5": ("jaune", "banane"),
     "6": ("orange", "mandarine"),
@@ -122,7 +134,16 @@ _COULEURS: dict[str, tuple[str, ...]] = {
     "10": ("vert", "basilic"),
     "11": ("rouge", "tomate"),
 }
-_PAR_NOM = {nom: cid for cid, noms in _COULEURS.items() for nom in noms}
+_PAR_NOM = {nom: cid for cid, noms in _COULEURS.items() for nom in noms} | {
+    nom: cid for cid, nom in _ETIQUETTES.items()
+}
+
+
+def _nom_couleur(color_id: str | None) -> str | None:
+    if color_id not in _COULEURS:
+        return None
+    return _ETIQUETTES.get(color_id) or _COULEURS[color_id][0]
+
 
 # Sentinel for update_event: drop colorId, back to the calendar's own color.
 _DEFAUT = "defaut"
@@ -160,9 +181,13 @@ def _resoudre_couleur(valeur: str | int, defaut_permis: bool = False) -> str | N
         return _PAR_NOM[cle]
     if defaut_permis and cle == _DEFAUT:
         return None
-    permis = ", ".join(noms[0] for noms in _COULEURS.values())
+    etiquettes = ", ".join(_ETIQUETTES.values())
+    couleurs = ", ".join(noms[0] for noms in _COULEURS.values())
     extra = f", ou '{_DEFAUT}'" if defaut_permis else ""
-    raise CouleurInconnueError(f"Couleur inconnue. Un id de 1 à 11, ou un nom : {permis}{extra}.")
+    raise CouleurInconnueError(
+        f"Couleur inconnue. Une étiquette ({etiquettes}), un id de 1 à 11, "
+        f"ou une couleur ({couleurs}){extra}."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +263,7 @@ def _summarize_event(event: dict, verbose: bool = False) -> dict:
         "organizer": (event.get("organizer") or {}).get("email"),
         "location": event.get("location"),
         "color_id": color_id,
-        "color_name": _COULEURS[color_id][0] if color_id in _COULEURS else None,
+        "color_name": _nom_couleur(color_id),
         "attendee_count": len(attendees),
         "hangout_link": event.get("hangoutLink"),
         "html_link": event.get("htmlLink"),
@@ -342,10 +367,20 @@ def create_event(
             own zone (override with the GWS_TIME_ZONE environment variable).
         send_updates: 'all' | 'externalOnly' | 'none'.
         add_meet: Attach a Google Meet link.
-        color: Event color. A Google colorId 1..11, or a name: vert (10,
-            appointments that need travel), mauve / workout (3), bleu, rouge,
-            jaune, orange, rose, gris, turquoise, lavande, sauge. Read back as
-            color_id and color_name. Unknown values are refused.
+        color: ALWAYS set it, chosen by the type of event. Richard's labels,
+            first match wins:
+              urgent (11)          it is urgent to get done; beats everything
+              road (10)            needs travel out of the house or the office,
+                                   the girls included when it happens outside
+              girls (4)            with or about his daughters, at home
+              workout (3)          training, exercise
+              work facturable (9)  billable work: Agence Gro, MonarK, Spacia,
+                                   any client
+              work (8)             non-billable YKS work
+              maison (6)           something he does from home
+            Also accepted: a colorId 1..11, or a plain color (vert, bleu,
+            rouge, ...). Read back as color_id and color_name. Unknown values
+            are refused.
     """
     color_id = _resoudre_couleur(color) if color is not None else None
     svc = service("calendar", "v3", account=account)
@@ -483,10 +518,7 @@ def freebusy(
         )
         .execute()
     )
-    return {
-        email: data.get("busy", [])
-        for email, data in resp.get("calendars", {}).items()
-    }
+    return {email: data.get("busy", []) for email, data in resp.get("calendars", {}).items()}
 
 
 def respond(
@@ -505,6 +537,7 @@ def respond(
     me = (account or "").lower()
     if not me:
         from accounts import default_account
+
         me = default_account().lower()
 
     attendees = event.get("attendees", []) or []
@@ -518,7 +551,13 @@ def respond(
         attendees.append({"email": me, "responseStatus": response})
     event["attendees"] = attendees
 
-    updated = svc.events().update(
-        calendarId=calendar_id, eventId=event_id, body=event, sendUpdates="all"
-    ).execute()
-    return {"event_id": event_id, "response": response, "status": _summarize_event(updated)["status"]}
+    updated = (
+        svc.events()
+        .update(calendarId=calendar_id, eventId=event_id, body=event, sendUpdates="all")
+        .execute()
+    )
+    return {
+        "event_id": event_id,
+        "response": response,
+        "status": _summarize_event(updated)["status"],
+    }

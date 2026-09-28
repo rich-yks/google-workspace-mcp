@@ -302,7 +302,9 @@ def cal_list_events(
     )
 
 
-@mcp.tool()
+# The published description is calendar_tools' own, word for word the one x.api
+# publishes: the color rules live in ONE place per repo, the twin module.
+@mcp.tool(description=calendar_tools.create_event.__doc__)
 def cal_create_event(
     summary: str,
     start: str,
@@ -328,10 +330,8 @@ def cal_create_event(
             own zone (override with the GWS_TIME_ZONE environment variable).
         send_updates: 'all' | 'externalOnly' | 'none'.
         add_meet: Attach a Google Meet link.
-        color: Event color. A Google colorId 1..11, or a name: vert (10,
-            appointments that need travel), mauve / workout (3), bleu, rouge,
-            jaune, orange, rose, gris, turquoise, lavande, sauge. Read back as
-            color_id and color_name. Unknown values are refused.
+        color: see calendar_tools.create_event, whose docstring is the one
+            published (it carries Richard's labels and their priority).
     """
     return calendar_tools.create_event(
         summary=summary, start=start, end=end, account=account,
@@ -341,7 +341,7 @@ def cal_create_event(
     )
 
 
-@mcp.tool()
+@mcp.tool(description=calendar_tools.update_event.__doc__)
 def cal_update_event(
     event_id: str,
     account: str | None = None,

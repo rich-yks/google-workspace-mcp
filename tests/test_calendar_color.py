@@ -98,7 +98,7 @@ def test_vert_a_la_creation_donne_le_basilic_de_richard(agenda_faux: Poser) -> N
     out = agenda.create_event("x", _DEBUT, _FIN, color="vert")
     assert evs.envoye["colorId"] == "10"
     assert out["color_id"] == "10"
-    assert out["color_name"] == "vert"
+    assert out["color_name"] == "road"
 
 
 @pytest.mark.parametrize(
@@ -114,6 +114,12 @@ def test_vert_a_la_creation_donne_le_basilic_de_richard(agenda_faux: Poser) -> N
         ("vert pâle", "2"),
         ("VERT PALE", "2"),
         (10, "10"),
+        ("urgent", "11"),
+        ("road", "10"),
+        ("girls", "4"),
+        ("Work Facturable", "9"),
+        ("work", "8"),
+        ("maison", "6"),
         (3, "3"),
     ],
 )
@@ -196,7 +202,7 @@ def test_la_lecture_rend_la_couleur(agenda_faux: Poser, verbose: bool) -> None:
     agenda_faux({**_BASE, "colorId": "3"})
     (ev,) = agenda.list_events(time_min="2026-10-26T00:00:00", verbose=verbose)
     assert ev["color_id"] == "3"
-    assert ev["color_name"] == "mauve"
+    assert ev["color_name"] == "workout"
 
 
 @pytest.mark.parametrize("outil", ["create_event", "update_event"])
@@ -215,3 +221,18 @@ def test_l_annotation_refuse_booleen_et_reel_avant_l_outil(outil: str, valeur: A
     assert adaptateur.validate_python("vert") == "vert"
     with pytest.raises(ValidationError):
         adaptateur.validate_python(valeur)
+
+
+def test_une_couleur_sans_etiquette_se_lit_par_sa_couleur(agenda_faux: Poser) -> None:
+    agenda_faux({**_BASE, "colorId": "5"})
+    (ev,) = agenda.list_events(time_min="2026-10-26T00:00:00")
+    assert ev["color_name"] == "jaune"
+
+
+def test_la_description_donne_les_etiquettes_dans_l_ordre_de_priorite() -> None:
+    """Un moteur choisit la couleur en lisant la description de cal_create_event :
+    l'ordre qu'elle affiche doit être celui de la table, urgent puis road en tête."""
+    doc = agenda.create_event.__doc__ or ""
+    positions = [doc.index(f"{nom} ({cid})") for cid, nom in agenda._ETIQUETTES.items()]
+    assert positions == sorted(positions)
+    assert list(agenda._ETIQUETTES.values())[:2] == ["urgent", "road"]
