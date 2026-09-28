@@ -110,11 +110,11 @@ DEFAULT_TZ = _local_tz_name()
 # A label is what color_name reads back.
 _ETIQUETTES: dict[str, str] = {
     "11": "urgent",
-    "10": "road",
-    "4": "girls",
     "3": "workout",
     "9": "work facturable",
     "8": "work",
+    "10": "road",
+    "4": "girls",
     "6": "maison",
 }
 
@@ -370,13 +370,15 @@ def create_event(
         color: ALWAYS set it, chosen by the type of event. Richard's labels,
             first match wins:
               urgent (11)          it is urgent to get done; beats everything
-              road (10)            needs travel out of the house or the office,
-                                   the girls included when it happens outside
-              girls (4)            with or about his daughters, at home
-              workout (3)          training, exercise
+              workout (3)          training, exercise: ALWAYS workout, even at
+                                   the gym or the dojo, even with the girls
               work facturable (9)  billable work: Agence Gro, MonarK, Spacia,
-                                   any client
-              work (8)             non-billable YKS work
+                                   any client, travel for it included
+              work (8)             non-billable YKS work, travel for it
+                                   included (a trip to MTL for work is work)
+              road (10)            a personal outing or appointment out of the
+                                   house or the office, the girls included
+              girls (4)            with or for his daughters, at home
               maison (6)           something he does from home
             Also accepted: a colorId 1..11, or a plain color (vert, bleu,
             rouge, ...). Read back as color_id and color_name. Unknown values

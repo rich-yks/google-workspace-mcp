@@ -231,8 +231,18 @@ def test_une_couleur_sans_etiquette_se_lit_par_sa_couleur(agenda_faux: Poser) ->
 
 def test_la_description_donne_les_etiquettes_dans_l_ordre_de_priorite() -> None:
     """Un moteur choisit la couleur en lisant la description de cal_create_event :
-    l'ordre qu'elle affiche doit être celui de la table, urgent puis road en tête."""
+    l'ordre qu'elle affiche doit être celui de la table. Tranché par Richard le
+    28 sept : urgent passe avant tout ; un entraînement reste workout et un
+    déplacement pour le travail reste du travail, road ne vient qu'après."""
     doc = agenda.create_event.__doc__ or ""
     positions = [doc.index(f"{nom} ({cid})") for cid, nom in agenda._ETIQUETTES.items()]
     assert positions == sorted(positions)
-    assert list(agenda._ETIQUETTES.values())[:2] == ["urgent", "road"]
+    assert list(agenda._ETIQUETTES.values()) == [
+        "urgent",
+        "workout",
+        "work facturable",
+        "work",
+        "road",
+        "girls",
+        "maison",
+    ]
