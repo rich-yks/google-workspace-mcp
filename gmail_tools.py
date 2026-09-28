@@ -456,6 +456,17 @@ def label_apply(
     remove: list[str] | None = None,
     account: str | None = None,
 ) -> dict:
+    # YKS: removing INBOX IS archiving, and adding SPAM or TRASH takes the
+    # message out of the inbox too. Richard never archives, so gmail_archive
+    # being denied in settings.json is not enough on its own. Same guard as the
+    # x.api twin (connecteurs/google/outils/gmail.py), since 28 Sept 2026.
+    retire = {name.strip().upper() for name in remove or []}
+    ajoute = {name.strip().upper() for name in add or []}
+    if "INBOX" in retire or ajoute & {"SPAM", "TRASH"}:
+        raise ValueError(
+            "Refused: Richard never archives. Removing INBOX, or adding SPAM or "
+            "TRASH, is not allowed; the only channel is read / unread (UNREAD)."
+        )
     svc = service("gmail", "v1", account=account)
     add_ids = _resolve_label_ids(svc, add) if add else []
     remove_ids = _resolve_label_ids(svc, remove) if remove else []
