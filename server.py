@@ -23,6 +23,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent))
 
 from fastmcp import FastMCP
+from pydantic import StrictInt
 
 import accounts
 import calendar_tools
@@ -314,6 +315,7 @@ def cal_create_event(
     time_zone: str | None = None,
     send_updates: str = "all",
     add_meet: bool = False,
+    color: str | StrictInt | None = None,
 ) -> dict:
     """Create a calendar event.
 
@@ -326,12 +328,16 @@ def cal_create_event(
             own zone (override with the GWS_TIME_ZONE environment variable).
         send_updates: 'all' | 'externalOnly' | 'none'.
         add_meet: Attach a Google Meet link.
+        color: Event color. A Google colorId 1..11, or a name: vert (10,
+            appointments that need travel), mauve / workout (3), bleu, rouge,
+            jaune, orange, rose, gris, turquoise, lavande, sauge. Read back as
+            color_id and color_name. Unknown values are refused.
     """
     return calendar_tools.create_event(
         summary=summary, start=start, end=end, account=account,
         calendar_id=calendar_id, description=description, location=location,
         attendees=attendees, time_zone=time_zone, send_updates=send_updates,
-        add_meet=add_meet,
+        add_meet=add_meet, color=color,
     )
 
 
@@ -349,18 +355,22 @@ def cal_update_event(
     attendees_remove: list[str] | None = None,
     time_zone: str | None = None,
     send_updates: str = "all",
+    color: str | StrictInt | None = None,
 ) -> dict:
     """Partial-update an event. Only pass fields you want to change.
 
     start/end follow the same rule as cal_create_event: no UTC offset means
     that wall-clock time in time_zone, which defaults to the machine's own zone.
+    color takes the same values as in cal_create_event, plus 'defaut' to
+    drop the color and fall back to the calendar's own. A change of color
+    alone notifies no one: sendUpdates is forced to 'none' for it.
     """
     return calendar_tools.update_event(
         event_id=event_id, account=account, calendar_id=calendar_id,
         summary=summary, start=start, end=end, description=description,
         location=location, attendees_add=attendees_add,
         attendees_remove=attendees_remove, time_zone=time_zone,
-        send_updates=send_updates,
+        send_updates=send_updates, color=color,
     )
 
 

@@ -7,11 +7,14 @@ attendee photos, conference phone numbers, or recurrence rules unless asked.
 from __future__ import annotations
 
 import os
+import unicodedata
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pydantic import StrictInt
 
 from accounts import service
 
@@ -98,6 +101,71 @@ DEFAULT_TZ = _local_tz_name()
 
 
 # ---------------------------------------------------------------------------
+# Colors
+# ---------------------------------------------------------------------------
+
+# Google's eleven event colors, by colorId. The first name is the one read back;
+# the others are accepted on the way in (Google's own French labels, and the
+# names Richard uses). "vert" is 10: read on 28 Sept 2026 from his 26 Oct physio
+# block, which he had colored by hand. Workouts are 3.
+# Same contract as x.api (connecteurs/google/outils/agenda.py): keep them twins.
+_COULEURS: dict[str, tuple[str, ...]] = {
+    "1": ("lavande",),
+    "2": ("sauge", "vert pale"),
+    "3": ("mauve", "raisin", "workout"),
+    "4": ("rose", "flamant"),
+    "5": ("jaune", "banane"),
+    "6": ("orange", "mandarine"),
+    "7": ("turquoise", "paon"),
+    "8": ("gris", "graphite"),
+    "9": ("bleu", "myrtille"),
+    "10": ("vert", "basilic"),
+    "11": ("rouge", "tomate"),
+}
+_PAR_NOM = {nom: cid for cid, noms in _COULEURS.items() for nom in noms}
+
+# Sentinel for update_event: drop colorId, back to the calendar's own color.
+_DEFAUT = "defaut"
+
+
+class CouleurInconnueError(ValueError):
+    """A color outside the closed list: the caller's mistake, never a server fault.
+
+    Its own class so the REST facade can answer 422 for it alone, without
+    turning every ValueError into a client error.
+    """
+
+
+def _cle_couleur(valeur: str | int) -> str:
+    # An int arrives from the REST script: `--param color=10` goes through
+    # json.loads. (True becomes "True", which no color matches.)
+    if isinstance(valeur, int):
+        return str(valeur)
+    if not isinstance(valeur, str):
+        return ""
+    sans_accents = unicodedata.normalize("NFKD", valeur).encode("ascii", "ignore").decode()
+    return " ".join(sans_accents.lower().split())
+
+
+def _resoudre_couleur(valeur: str | int, defaut_permis: bool = False) -> str | None:
+    """A colorId from an id or a name; None means "drop the color".
+
+    Closed list: anything else raises before Google is called. The value
+    received is not echoed back, only the list of what is allowed.
+    """
+    cle = _cle_couleur(valeur)
+    if cle in _COULEURS:
+        return cle
+    if cle in _PAR_NOM:
+        return _PAR_NOM[cle]
+    if defaut_permis and cle == _DEFAUT:
+        return None
+    permis = ", ".join(noms[0] for noms in _COULEURS.values())
+    extra = f", ou '{_DEFAUT}'" if defaut_permis else ""
+    raise CouleurInconnueError(f"Couleur inconnue. Un id de 1 à 11, ou un nom : {permis}{extra}.")
+
+
+# ---------------------------------------------------------------------------
 # Time helpers
 # ---------------------------------------------------------------------------
 
@@ -159,6 +227,7 @@ def _summarize_event(event: dict, verbose: bool = False) -> dict:
     start = event.get("start", {})
     end = event.get("end", {})
     attendees = event.get("attendees", []) or []
+    color_id = event.get("colorId")
 
     out: dict[str, Any] = {
         "id": event["id"],
@@ -168,6 +237,8 @@ def _summarize_event(event: dict, verbose: bool = False) -> dict:
         "status": event.get("status"),
         "organizer": (event.get("organizer") or {}).get("email"),
         "location": event.get("location"),
+        "color_id": color_id,
+        "color_name": _COULEURS[color_id][0] if color_id in _COULEURS else None,
         "attendee_count": len(attendees),
         "hangout_link": event.get("hangoutLink"),
         "html_link": event.get("htmlLink"),
@@ -258,7 +329,25 @@ def create_event(
     time_zone: str | None = None,
     send_updates: str = "all",
     add_meet: bool = False,
+    color: str | StrictInt | None = None,
 ) -> dict:
+    """Create a calendar event.
+
+    Args:
+        start, end: ISO 8601 (or 'now'/'today'/'tomorrow'). Written without a
+            UTC offset ('2026-08-18T09:00:00') they mean that wall-clock time
+            in time_zone, which is almost always what a person means. Include
+            an offset ('...T09:00:00-04:00') to pin an exact instant.
+        time_zone: IANA name, e.g. 'America/Caracas'. Defaults to the machine's
+            own zone (override with the GWS_TIME_ZONE environment variable).
+        send_updates: 'all' | 'externalOnly' | 'none'.
+        add_meet: Attach a Google Meet link.
+        color: Event color. A Google colorId 1..11, or a name: vert (10,
+            appointments that need travel), mauve / workout (3), bleu, rouge,
+            jaune, orange, rose, gris, turquoise, lavande, sauge. Read back as
+            color_id and color_name. Unknown values are refused.
+    """
+    color_id = _resoudre_couleur(color) if color is not None else None
     svc = service("calendar", "v3", account=account)
     # One zone for both halves: the offset written into dateTime has to agree
     # with timeZone, because Google resolves the event by the offset and keeps
@@ -276,6 +365,8 @@ def create_event(
         body["location"] = location
     if attendees:
         body["attendees"] = [{"email": a} for a in attendees]
+    if color_id:
+        body["colorId"] = color_id
     if add_meet:
         body["conferenceData"] = {
             "createRequest": {
@@ -305,10 +396,29 @@ def update_event(
     attendees_remove: list[str] | None = None,
     time_zone: str | None = None,
     send_updates: str = "all",
+    color: str | StrictInt | None = None,
 ) -> dict:
+    """Partial-update an event. Only pass fields you want to change.
+
+    start/end follow the same rule as cal_create_event: no UTC offset means
+    that wall-clock time in time_zone, which defaults to the machine's own zone.
+    color takes the same values as in cal_create_event, plus 'defaut' to drop
+    the color and fall back to the calendar's own. A change of color alone
+    notifies no one: sendUpdates is forced to 'none' for it.
+    """
+    color_id = _resoudre_couleur(color, defaut_permis=True) if color is not None else None
+    autres = (summary, start, end, description, location, attendees_add, attendees_remove)
+    if color is not None and all(v is None for v in autres):
+        send_updates = "none"
     svc = service("calendar", "v3", account=account)
     event = svc.events().get(calendarId=calendar_id, eventId=event_id).execute()
     tz = time_zone or DEFAULT_TZ
+
+    if color is not None:
+        if color_id is None:
+            event.pop("colorId", None)
+        else:
+            event["colorId"] = color_id
 
     if summary is not None:
         event["summary"] = summary
